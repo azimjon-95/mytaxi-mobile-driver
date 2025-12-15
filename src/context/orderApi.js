@@ -1,0 +1,149 @@
+import { api } from "./api";
+
+export const orderApi = api.injectEndpoints({
+    endpoints: (builder) => ({
+
+        // =================== CREATE ORDER ===================
+        createOrder: builder.mutation({
+            query: (data) => ({
+                url: "/orders",
+                method: "POST",
+                body: data,
+            }),
+            invalidatesTags: ["Orders"],
+        }),
+
+        // =================== GET ALL ORDERS ===================
+        getOrders: builder.query({
+            query: () => "/orders",
+            providesTags: ["Orders"],
+        }),
+
+        // =================== GET ORDER BY ID ===================
+        getOrderById: builder.query({
+            query: (id) => `/orders/${id}`,
+        }),
+
+        // =================== UPDATE ORDER ===================
+        updateOrder: builder.mutation({
+            query: ({ id, ...data }) => ({
+                url: `/orders/${id}`,
+                method: "PUT",
+                body: data,
+            }),
+            invalidatesTags: ["Orders"],
+        }),
+
+        // =================== DELETE ORDER ===================
+        deleteOrder: builder.mutation({
+            query: (id) => ({
+                url: `/orders/${id}`,
+                method: "DELETE",
+            }),
+            invalidatesTags: ["Orders"],
+        }),
+
+
+        // =================== CLIENT ASSIGNS DRIVER ===================
+        assignDriverByClient: builder.mutation({
+            query: (data) => ({
+                url: "/orders/assign-driver",
+                method: "POST",
+                body: data,
+            }),
+        }),
+
+        // =================== START METER ===================
+        startMeter: builder.mutation({
+            query: (data) => ({
+                url: "/orders/start-meter",
+                method: "POST",
+                body: data,
+            }),
+        }),
+
+        // =================== UPDATE METER ===================
+        updateMeter: builder.mutation({
+            query: (data) => ({
+                url: "/orders/update-meter",
+                method: "POST",
+                body: data,
+            }),
+        }),
+
+        // =================== COMPLETE ORDER ===================
+        completeOrder: builder.mutation({
+            query: (data) => ({
+                url: "/orders/complete",
+                method: "POST",
+                body: data,
+            }),
+            invalidatesTags: ["Orders"],
+        }),
+
+        // =================== WATCH ACTIVE ORDER ===================
+        // socket bilan BEPUL ulanish uchun
+        watchActiveOrder: builder.query({
+            query: (clientId) => ({
+                url: `/orders/live/${clientId}`,
+                method: "GET",
+
+            }),
+        }),
+
+        //"/orders/drivers/:clientId/:orderId",
+        getAvailableDrivers: builder.query({
+            query: ({ clientId: clId, orderId: orId }) => ({
+                url: `/orders/drivers/${clId}/${orId}`,
+                method: "GET",
+            }),
+        }),
+
+        //post("/orders/select-driver", orderCtrl.selectDriver);
+        assignDriver: builder.mutation({
+            query: ({ orderId, driverId }) => ({
+                url: "/orders/select-driver",
+                method: "POST",
+                body: { orderId, driverId },
+            }),
+        }),
+
+
+        // post("/orders/cancel/:orderId", orderCtrl.cancelOrder);
+        cancelOrder: builder.mutation({
+            query: ({ orderId, body }) => ({
+                url: `/orders/cancel/${orderId}`,
+                method: "POST",
+                body,
+            }),
+        }),
+
+
+        // get("/main/orders/:driverId", orderCtrl.getOrderByDriverId);
+        getOrderByDriverId: builder.query({
+            query: (driverId) => ({
+                url: `/main/orders/${driverId}`,
+                method: "GET",
+
+            }),
+        }),
+    }),
+});
+
+// EXPORT HOOKS
+export const {
+    useCreateOrderMutation,
+    useGetOrdersQuery,
+    useGetOrderByIdQuery,
+    useUpdateOrderMutation,
+    useDeleteOrderMutation,
+    useAssignDriverByClientMutation,
+    useStartMeterMutation,
+    useUpdateMeterMutation,
+    useCompleteOrderMutation,
+    useWatchActiveOrderQuery,
+    useGetAvailableDriversQuery,
+    useAssignDriverMutation,
+    useCancelOrderMutation,
+    useGetOrderByDriverIdQuery,
+} = orderApi;
