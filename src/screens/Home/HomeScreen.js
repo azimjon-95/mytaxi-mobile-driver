@@ -13,7 +13,8 @@ import socket from "../../socket";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Audio } from 'expo-av';
 import { useSelector } from 'react-redux';
-import { useGetOrderByDriverIdQuery } from '../../context/orderApi';
+import { useGetOrderByDriverIdQuery, useAssignDriverByClientMutation } from '../../context/orderApi';
+import { useGetDriverlocationByIdQuery } from '../../context/driverApi';
 import * as Location from 'expo-location';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import TimeSelectionModal from "./TimeSelectionModal";
@@ -23,18 +24,31 @@ export default function Main({ navigation, setHasDriver }) {
 
     /* ===================== STATES ===================== */
     const [modalVisible, setModalVisible] = useState(false);
-    const [orders, setOrders] = useState([]);
     const playRequest = useSelector(state => state.sound.playRequest);
     const [riverData, setDriverData] = useState(null);
-
-
+    const [driverIsActive, setDriverIsActive] = useState(false);
+    const [assignDriver, { isLoading }] = useAssignDriverByClientMutation();
     const soundRef = useRef(null);
+
+    // const { data: driverLocation, refetch: driverLocationRefetch } = useGetDriverlocationByIdQuery(riverData);
+    // useEffect(() => {
+    //     const eventName = `driverLocationUpdated`;
+
+    //     socket.on(eventName, () => {
+    //         driverLocationRefetch();
+    //     });
+    //     return () => socket.off(eventName);
+    // }, [driverLocationRefetch]);
+    // console.log(driverLocation);
+
 
     /* ===================== LOAD DRIVER STATUS ===================== */
     useEffect(() => {
         (async () => {
             const driver = JSON.parse(await AsyncStorage.getItem("driverData"));
+            const active = JSON.parse(await AsyncStorage.getItem("driverActive"));
             setDriverData(driver?._id);
+            setDriverIsActive(active);
         })();
     }, []);
 
@@ -66,84 +80,77 @@ export default function Main({ navigation, setHasDriver }) {
         }
     }, [playRequest]);
 
-    /* ===================== PLAY NOTIFICATION ===================== */
-    const playNotificationSound = async () => {
-        try {
-            // if (!soundRef.current) return;
-            await soundRef.current.replayAsync();
-            Vibration.vibrate(100);
-        } catch (e) {
-            console.log("Play error:", e);
+
+    const handleAssignDriver = async (order) => {
+        if (!riverData) {
+            console.log("Driver topilmadi");
+            return;
         }
-    };
+        if (!order?.location || !data?.innerData?.driverLocation) {
+            console.log("Location topilmadi");
+            return;
+        }
 
-
-    /* ===================== ACCEPT ORDER ===================== */
-    const handleAcceptOrder = async (order) => {
         try {
-            const { status } = await Location.requestForegroundPermissionsAsync();
-            if (status !== 'granted') {
-                alert("Lokatsiyaga ruxsat berilmadi");
-                return;
-            }
+            const response = await assignDriver({
+                orderId: order._id,
+                driverId: riverData,
+                driverLocation: data.innerData.driverLocation,
+                clientLocation: order.location
+            }).unwrap(); // unwrap → promise resolve qilinadi yoki xatolik throw qilinadi
 
-            const location = await Location.getCurrentPositionAsync({
-                accuracy: Location.Accuracy.High,
-            });
-
-            setOrders(prev =>
-                prev.map(o =>
-                    o.id === order.id
-                        ? {
-                            ...o,
-                            accepted: true,
-                            driverLocation: {
-                                latitude: location.coords.latitude,
-                                longitude: location.coords.longitude,
-                            }
-                        }
-                        : o
-                )
-            );
-        } catch (e) {
-            console.log("Accept error:", e);
+            console.log("Driver assigned successfully:", response);
+        } catch (err) {
+            console.error("Assign driver error:", err);
         }
     };
 
     /* ===================== OPEN ROUTE ===================== */
-    const handleOpenRoute = (order) => {
-        if (!order.driverLocation) return;
+    const handleOpenRoute = async (order) => {
+        const driverLocation = data?.innerData?.driverLocation;
+        if (!driverLocation || !order?.location) {
+            console.log("Location topilmadi");
+            return;
+        }
 
-        const { latitude, longitude } = order.location;
-        const destination = encodeURIComponent(order.to);
+        const startLat = driverLocation.latitude;
+        const startLng = driverLocation.longitude;
+        const endLat = order.location.latitude;
+        const endLng = order.location.longitude;
 
-        const url = Platform.select({
-            android: `google.navigation:q=${destination}&mode=d`,
-            ios: `maps://?saddr=${latitude},${longitude}&daddr=${destination}`,
-        });
+        let url = "";
+        let fallbackUrl = "";
 
-        Linking.openURL(url);
+        if (Platform.OS === "android") {
+            url = `google.navigation:q=${endLat},${endLng}&mode=d`;
+            fallbackUrl = `https://www.google.com/maps/dir/?api=1&destination=${endLat},${endLng}`;
+        } else if (Platform.OS === "ios") {
+            url = `yandexmaps://maps.yandex.com/?rtext=${startLat},${startLng}~${endLat},${endLng}&rtt=auto`;
+            fallbackUrl = `https://yandex.com/maps/?rtext=${startLat},${startLng}~${endLat},${endLng}&rtt=auto`;
+        }
+        else {
+            // ✅ WINDOWS / WEB → Browser orqali Yandex Maps
+            url = `https://yandex.com/maps/?rtext=${startLat},${startLng}~${endLat},${endLng}&rtt=auto`;
+        }
+
+        try {
+            const supported = await Linking.canOpenURL(url);
+            if (supported) {
+                await Linking.openURL(url);
+            } else {
+                await Linking.openURL(fallbackUrl);
+            }
+        } catch (err) {
+            console.error("Map open error:", err);
+        }
     };
+
 
     /* ===================== ORDER CARD ===================== */
     const OrderCard = ({ order }) => {
-        // const anims = animatedValues.current[order._id];
-        const anims = order;
 
         return (
-            <Animated.View
-                style={[
-                    styles.orderCard,
-                    {
-                        transform: [
-                            { translateX: anims.translateX },
-                            { translateY: anims.translateY },
-                            { scale: anims.scale },
-                        ],
-                        opacity: anims.opacity,
-                    }
-                ]}
-            >
+            <Animated.View style={styles.orderCard} >
                 {/* HEADER */}
                 <View >
                     <View style={styles.orderHeader}>
@@ -156,9 +163,13 @@ export default function Main({ navigation, setHasDriver }) {
                             <Icon name="directions-car" size={16} color="#fff" />
                             <Text style={styles.distanceText}>{order.distance} km</Text>
                         </View>
-                        <View style={styles.acceptBtn} onPress={() => handleOpenRoute(order)}>
+                        <TouchableOpacity
+                            style={styles.acceptBtn}
+                            onPress={() => handleOpenRoute(order)}
+                        >
                             <Icon name="map" size={20} color="#2ecc71" />
-                        </View>
+                        </TouchableOpacity>
+
                     </View>
 
                     {/* FOOTER */}
@@ -168,8 +179,9 @@ export default function Main({ navigation, setHasDriver }) {
                         </View>
                         <TouchableOpacity
                             style={styles.routeBtn}
-                            // disabled={order.accepted}
-                            onPress={() => handleAcceptOrder(order)}
+                            disabled={isLoading}
+                            loading={isLoading}
+                            onPress={() => handleAssignDriver(order)}
                         >
                             <Icon name="check-circle" size={18} color="#1e293be2" />
                             <Text style={styles.btnText}>Qabul qilish</Text>
@@ -184,25 +196,28 @@ export default function Main({ navigation, setHasDriver }) {
     return (
         <View style={styles.container}>
 
-            {!data?.innerData?.isActive && (
+            {driverIsActive === false && (
                 <View style={styles.inactiveBanner}>
                     <Text style={styles.inactiveText}>
                         🚨 Siz hozir faol emassiz
                     </Text>
                 </View>
             )}
+            {driverIsActive === true && (
+                <>
+                    <ScrollView showsVerticalScrollIndicator={false}>
+                        {data?.innerData?.orders.map((order, index) => (
+                            <OrderCard key={index} order={order} />
+                        ))}
+                    </ScrollView>
 
-            <ScrollView showsVerticalScrollIndicator={false}>
-                {data?.innerData?.orders.map((order, index) => (
-                    <OrderCard key={index} order={order} />
-                ))}
-            </ScrollView>
+                    <TimeSelectionModal
+                        visible={modalVisible}
+                        setHasDriver={setHasDriver}
+                        onClose={() => setModalVisible(false)}
+                    />
+                </>)}
 
-            <TimeSelectionModal
-                visible={modalVisible}
-                setHasDriver={setHasDriver}
-                onClose={() => setModalVisible(false)}
-            />
         </View>
     );
 }

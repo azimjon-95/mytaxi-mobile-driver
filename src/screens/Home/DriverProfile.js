@@ -52,15 +52,15 @@ export default function DriverProfile() {
     const saveProfile = async () => {
         try {
             const res = await updateDriver({
-                id: driver._id,  // Muhim: driver ID yuborilishi kerak
+                id: driver?._id,  // Muhim: driver ID yuborilishi kerak
                 body: {
-                    firstName: driver.firstName,
-                    lastName: driver.lastName,
-                    phoneNumber: driver.phoneNumber,
-                    address: driver.address,
-                    login: driver.login,
-                    password: driver.password || undefined, // bo'sh parol yuborilmasin (agar o'zgarmasa)
-                    additionalServices: driver.additionalServices?.map(s => s._id) || [],
+                    firstName: driver?.firstName,
+                    lastName: driver?.lastName,
+                    phoneNumber: driver?.phoneNumber,
+                    address: driver?.address,
+                    login: driver?.login,
+                    password: driver?.password || undefined, // bo'sh parol yuborilmasin (agar o'zgarmasa)
+                    additionalServices: driver?.additionalServices?.map(s => s._id) || [],
                 },
             }).unwrap();
             await AsyncStorage.setItem("driverData", JSON.stringify(res?.innerData) || res);
@@ -88,22 +88,22 @@ export default function DriverProfile() {
             </View>
             {/* EDITABLE */}
             <View style={styles.row}>
-                <Input label="Ism" value={driver.firstName} onChange={v => updateField("firstName", v)} />
-                <Input label="Familiya" value={driver.lastName} onChange={v => updateField("lastName", v)} />
+                <Input label="Ism" value={driver?.firstName} onChange={v => updateField("firstName", v)} />
+                <Input label="Familiya" value={driver?.lastName} onChange={v => updateField("lastName", v)} />
             </View>
 
             <View style={styles.row}>
-                <Input label="Tug‘ilgan sana" value={driver.birthDate.slice(0, 10)} />
-                <Input label="Telefon" value={driver.phoneNumber} onChange={v => updateField("phoneNumber", v)} />
+                <Input label="Tug‘ilgan sana" value={driver?.birthDate.slice(0, 10)} />
+                <Input label="Telefon" value={driver?.phoneNumber} onChange={v => updateField("phoneNumber", v)} />
             </View>
 
             <View style={styles.row}>
-                <Input label="Manzil" value={driver.address} onChange={v => updateField("address", v)} />
-                <Input label="Login" value={driver.login} onChange={v => updateField("login", v)} />
+                <Input label="Manzil" value={driver?.address} onChange={v => updateField("address", v)} />
+                <Input label="Login" value={driver?.login} onChange={v => updateField("login", v)} />
             </View>
 
             <View style={styles.row}>
-                <Input label="Parol" value={driver.password} secure onChange={v => updateField("password", v)} />
+                <Input label="Parol" value={driver?.password} secure onChange={v => updateField("password", v)} />
             </View>
 
             {/* ADDITIONAL SERVICES */}
@@ -127,14 +127,14 @@ export default function DriverProfile() {
             {/* READ ONLY */}
             <Text style={styles.sectionTitle}>🚗 Avtomobil</Text>
             <View style={styles.row}>
-                <Readonly label="Mashina" value={`${driver.car.make} ${driver.car.model}`} />
-                <Readonly label="Yil" value={driver.car.year} />
+                <Readonly label="Mashina" value={`${driver?.car?.make} ${driver?.car?.model}`} />
+                <Readonly label="Yil" value={driver?.car?.year} />
             </View>
             <View style={styles.row}>
-                <Readonly label="Rang" value={driver.car.color} />
-                <Readonly label="Raqam" value={driver.car.plateNumber} />
+                <Readonly label="Rang" value={driver?.car?.color} />
+                <Readonly label="Raqam" value={driver?.car?.plateNumber} />
             </View>
-            <Readonly label="Tarif" value={driver.car.carType.label} />
+            <Readonly label="Tarif" value={driver?.car?.carType?.label || "Noma'lum"} />
 
             <TouchableOpacity style={styles.saveBtn} onPress={saveProfile}>
                 <Text style={styles.saveText}>💾 Saqlash</Text>

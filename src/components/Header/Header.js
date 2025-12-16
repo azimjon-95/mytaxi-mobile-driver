@@ -5,141 +5,164 @@ import {
     TouchableOpacity,
     Modal,
     Switch,
-    Linking,
+    Animated,
 } from "react-native";
-import { useDispatch } from 'react-redux';
-import { requestPlay } from '../../context/actions/soundSlice';
-import Icon from "react-native-vector-icons/MaterialIcons";
-import Geolocation from "@react-native-community/geolocation";
+import * as Location from "expo-location";
+import { MaterialIcons } from "@expo/vector-icons";
+import axios from "../../api";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useToggleDriverMutation } from "../../context/driverApi";
+import getDistanceInMeters from "../../hooks/Distance";
 import styles from "./styles";
 
 export default function Header({ onHamburgerPress }) {
     const [isWorking, setIsWorking] = useState(false);
     const [confirmVisible, setConfirmVisible] = useState(false);
     const [nextValue, setNextValue] = useState(false);
-    const [gpsModalVisible, setGpsModalVisible] = useState(false);
+    const lastLocationRef = useRef(null);
+    const [isSendingLocation, setIsSendingLocation] = useState(false);
+
     const driverRef = useRef(null);
-    const dispatch = useDispatch();
-    const watchId = useRef(null);
-    const lastSentTime = useRef(0);
+    const [toggleDriver] = useToggleDriverMutation();
+
+    // Antena animatsiyasi uchun
+    const antennaScale = useRef(new Animated.Value(1)).current;
+    const antennaOpacity = useRef(new Animated.Value(0.6)).current;
+
+    useEffect(() => {
+        (async () => {
+            const data = await AsyncStorage.getItem("driverData");
+            const active = await AsyncStorage.getItem("driverActive");
+            if (data) {
+                driverRef.current = JSON.parse(data);
+                setIsWorking(active ? JSON.parse(active) : false);
+            }
+        })();
+    }, []);
+
+    // Antena animatsiyasi
+    useEffect(() => {
+        if (isSendingLocation) {
+            Animated.parallel([
+                Animated.sequence([
+                    Animated.timing(antennaScale, {
+                        toValue: 1.2,
+                        duration: 300,
+                        useNativeDriver: true,
+                    }),
+                    Animated.timing(antennaScale, {
+                        toValue: 0.9,
+                        duration: 300,
+                        useNativeDriver: true,
+                    }),
+                ]),
+                Animated.sequence([
+                    Animated.timing(antennaOpacity, {
+                        toValue: 1,
+                        duration: 300,
+                        useNativeDriver: true,
+                    }),
+                    Animated.timing(antennaOpacity, {
+                        toValue: 0.6,
+                        duration: 300,
+                        useNativeDriver: true,
+                    }),
+                ]),
+            ]).start();
+        }
+    }, [isSendingLocation]);
+
+    useEffect(() => {
+        let locationInterval = null;
+
+        if (isWorking && driverRef.current?._id) {
+            getUserLocation();  // 1️⃣
+
+            locationInterval = setInterval(() => {
+                getUserLocation(); // 2️⃣
+            }, 2000);
+        }
+
+        return () => {
+            if (locationInterval) clearInterval(locationInterval);
+        };
+    }, [isWorking]);
+
+    const getUserLocation = async () => {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== "granted") return;
+        const token = await AsyncStorage.getItem("driverToken");
+        Location.watchPositionAsync(
+            {
+                accuracy: Location.Accuracy.High,
+                distanceInterval: 3, // faqat 3 metr siljiganida chaqiriladi
+                timeInterval: 2000,   // yoki 2 sekunddan tez chaqirmaydi
+            },
+            async (location) => {
+                const { latitude, longitude, accuracy } = location.coords;
+
+                // GPS ishonchsiz bo‘lsa yubormaymiz
+                if (accuracy > 10) return;
+
+                // Oldingi location bilan masofa tekshiruvi (optional)
+                if (lastLocationRef.current) {
+                    const distance = getDistanceInMeters(
+                        lastLocationRef.current.latitude,
+                        lastLocationRef.current.longitude,
+                        latitude,
+                        longitude
+                    );
+                    if (distance < 3) return; // faqat 4+ metr bo‘lsa yuborish
+                }
+
+                // Yangi location-ni saqlaymiz
+                lastLocationRef.current = { latitude, longitude };
+                setIsSendingLocation(true);
+
+                await axios.post(
+                    "/main/driver/location",
+                    {
+                        driverId: driverRef.current._id,
+                        latitude,
+                        longitude,
+                    },
+                    {
+                        headers: {
+                            "Content-Type": "application/json",
+                            Authorization: `Bearer ${token}`,
+                        },
+                    }
+                );
+
+                setIsSendingLocation(false);
+            }
+        );
+    };
 
     const handleSwitchPress = (value) => {
         setNextValue(value);
         setConfirmVisible(true);
     };
 
-    const checkGPS = () =>
-        new Promise((resolve) => {
-            Geolocation.getCurrentPosition(
-                () => resolve(true),
-                () => resolve(false),
-                { enableHighAccuracy: true, timeout: 5000 }
-            );
-        });
-
-
-    useEffect(() => {
-        (async () => {
-            const data = await AsyncStorage.getItem("driverData");
-            if (data) driverRef.current = JSON.parse(data);
-        })();
-    }, []);
-
-    // --- useEffect yordamida driverActive ni AsyncStorage ga saqlash ---
-    useEffect(() => {
-        const saveDriverActive = async () => {
-            try {
-                await AsyncStorage.setItem(
-                    "driverActive",
-                    JSON.stringify(isWorking)
-                );
-            } catch (err) {
-                console.log("Driver active save error:", err.message);
-            }
-        };
-
-        saveDriverActive();
-    }, [isWorking]); // isWorking o‘zgarganda trigger bo‘ladi
-
-    const sendLocationToServer = async (lat, lng) => {
-        if (!driverRef.current?._id) return;
-
-        try {
-            await fetch("https://YOUR_API_URL/api/driver/location", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({
-                    latitude: lat,
-                    longitude: lng,
-                    driverId: driverRef.current._id,
-                }),
-            });
-
-        } catch (err) {
-            console.log("GPS send failed:", err.message);
-        }
-    };
-
-
-    // GPS WATCH BOSHLASH
-    const startTracking = () => {
-
-        watchId.current = Geolocation.watchPosition(
-            (pos) => {
-                const now = Date.now();
-
-                // ⏱ har 2 sekundda
-                if (now - lastSentTime.current < 2000) return;
-                lastSentTime.current = now;
-
-                const { latitude, longitude } = pos.coords;
-                sendLocationToServer(latitude, longitude);
-            },
-            (err) => console.log("GPS watch error:", err),
-            {
-                enableHighAccuracy: true,
-                distanceFilter: 5,
-            }
-        );
-    };
-
-    // GPS WATCH TO‘XTATISH
-    const stopTracking = () => {
-        if (watchId.current !== null) {
-            Geolocation.clearWatch(watchId.current);
-            watchId.current = null;
-        }
-    };
-
     const confirmAction = async () => {
-        if (nextValue) {
-            dispatch(requestPlay())
-            const gpsEnabled = await checkGPS();
-            if (!gpsEnabled) {
-                setConfirmVisible(false);
-                setGpsModalVisible(true);
-                return;
-            }
-            startTracking();
-        } else {
-            stopTracking();
+        try {
+            const res = await toggleDriver({
+                driverId: driverRef.current._id,
+                isActive: nextValue, // 🔴 MUHIM
+            }).unwrap();
+
+            await AsyncStorage.setItem("driverActive", JSON.stringify(res?.innerData?.isActive) || false);
+
+            setIsWorking(nextValue); // UI bilan sinxron
+        } catch (err) {
+            console.log("Driver toggle failed:", err?.data?.message || err);
         }
 
-        setIsWorking(nextValue);
         setConfirmVisible(false);
     };
 
-    // COMPONENT UNMOUNT
-    useEffect(() => {
-        return () => stopTracking();
-    }, []);
-
     return (
         <>
-            {/* HEADER */}
             <View style={styles.header}>
                 <TouchableOpacity
                     style={styles.hamburgerBtn}
@@ -151,8 +174,25 @@ export default function Header({ onHamburgerPress }) {
                 </TouchableOpacity>
 
                 <View style={styles.workBox}>
+                    {/* Antena Icon */}
+                    {isWorking && (
+                        <Animated.View
+                            style={{
+                                marginRight: 5,
+                                transform: [{ scale: antennaScale }],
+                                opacity: antennaOpacity,
+                            }}
+                        >
+                            <MaterialIcons
+                                name="cell-tower"
+                                size={20}
+                                color={isSendingLocation ? "#00ff7f" : "#888"}
+                            />
+                        </Animated.View>
+                    )}
+
                     <Text style={styles.workText}>
-                        {isWorking ? "Ishda" : "To‘xtatilgan"}
+                        {isWorking ? "Ishda" : "To'xtatilgan"}
                     </Text>
                     <Switch
                         value={isWorking}
@@ -166,11 +206,9 @@ export default function Header({ onHamburgerPress }) {
             <Modal transparent animationType="fade" visible={confirmVisible}>
                 <View style={styles.modalOverlay}>
                     <View style={styles.modalBox}>
-                        <Icon name="warning" size={42} color="#ffcc00" />
+                        <MaterialIcons name="warning" size={42} color="#ffcc00" />
                         <Text style={styles.modalTitle}>
-                            {nextValue
-                                ? "Ishni boshlaysizmi?"
-                                : "Ishni to‘xtatasizmi?"}
+                            {nextValue ? "Ishni boshlaysizmi?" : "Ishni to'xtatasizmi?"}
                         </Text>
 
                         <View style={styles.modalActions}>
@@ -178,7 +216,7 @@ export default function Header({ onHamburgerPress }) {
                                 style={styles.cancelBtn}
                                 onPress={() => setConfirmVisible(false)}
                             >
-                                <Text style={styles.cancelText}>Yo‘q</Text>
+                                <Text style={styles.cancelText}>Yo'q</Text>
                             </TouchableOpacity>
 
                             <TouchableOpacity
@@ -192,49 +230,6 @@ export default function Header({ onHamburgerPress }) {
                 </View>
             </Modal>
 
-            {/* GPS MODAL */}
-            <Modal transparent animationType="fade" visible={gpsModalVisible}>
-                <View style={styles.modalOverlay}>
-                    <View style={styles.modalBox}>
-                        <Icon name="location-off" size={48} color="#ff4d4d" />
-                        <Text style={styles.modalTitle}>GPS o‘chiq</Text>
-                        <Text style={styles.gpsText}>
-                            Ishni boshlash uchun GPS yoqilishi kerak
-                        </Text>
-
-                        <View style={styles.modalActions}>
-                            <TouchableOpacity
-                                style={styles.cancelBtn}
-                                onPress={() => setGpsModalVisible(false)}
-                            >
-                                <Text style={styles.cancelText}>Bekor</Text>
-                            </TouchableOpacity>
-
-                            <TouchableOpacity
-                                style={styles.okBtn}
-                                onPress={() => {
-                                    setGpsModalVisible(false);
-                                    Linking.openSettings();
-                                }}
-                            >
-                                <Icon
-                                    name="location-on"
-                                    size={18}
-                                    color="#101820"
-                                />
-                                <Text
-                                    style={[
-                                        styles.okText,
-                                        { marginLeft: 6 },
-                                    ]}
-                                >
-                                    GPS ni yoqish
-                                </Text>
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                </View>
-            </Modal>
         </>
     );
 }

@@ -47,6 +47,22 @@ export const driverApi = api.injectEndpoints({
                 method: "DELETE",
             }),
         }),
+
+        // patch("/main/drivers/:driverId/toggle",
+        toggleDriver: builder.mutation({
+            query: ({ driverId, isActive }) => (
+                {
+                    url: `/driver/toggle/${driverId}`,
+                    method: "PATCH",
+                    body: { isActive },
+                }),
+        }),
+
+        getDriverlocationById: builder.query({
+            query: (driverId) => `/main/driver/location/${driverId}`,
+            // query: (driverId) => `/main/driver/location/${driverId}`,
+        }),
+
     }),
     overrideExisting: false,
 });
@@ -59,4 +75,7 @@ export const {
     useGetDriverByIdQuery,
     useUpdateDriverMutation,
     useDeleteDriverMutation,
+    useToggleDriverMutation,
+    useGetDriverlocationByIdQuery,
+
 } = driverApi;

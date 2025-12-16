@@ -48,10 +48,11 @@ export default function App() {
 
   return (
     <NotificationProvider>
-      <StatusBar style="light" />
+      <StatusBar style="light" backgroundColor="#101820" />
+      <View style={{ height: 34, backgroundColor: "#101820" }} />
+
       <NavigationContainer>
         <Stack.Navigator screenOptions={{ headerShown: false }}>
-
           {/* 🔐 AUTH */}
           {!isAuth ? (
             <>

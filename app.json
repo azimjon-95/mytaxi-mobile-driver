@@ -32,6 +32,9 @@
         "projectId": "d8f254dc-94b9-4144-98a0-f181b8c1b8d8"
       }
     },
-    "owner": "azimjon95m"
+    "owner": "azimjon95m",
+    "plugins": [
+      "expo-audio"
+    ]
   }
 }
