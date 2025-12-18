@@ -5,7 +5,7 @@ import {
     ScrollView,
     Animated,
     TouchableOpacity,
-    Vibration,
+    ActivityIndicator,
     Platform,
     Linking
 } from "react-native";
@@ -28,6 +28,9 @@ export default function Main({ navigation, setHasDriver }) {
     const [riverData, setDriverData] = useState(null);
     const [driverIsActive, setDriverIsActive] = useState(false);
     const [assignDriver, { isLoading }] = useAssignDriverByClientMutation();
+    const [activeOrderId, setActiveOrderId] = useState(null);
+    const [countdown, setCountdown] = useState(0);
+    const timerRef = useRef(null);
     const soundRef = useRef(null);
 
     // const { data: driverLocation, refetch: driverLocationRefetch } = useGetDriverlocationByIdQuery(riverData);
@@ -52,17 +55,34 @@ export default function Main({ navigation, setHasDriver }) {
         })();
     }, []);
 
+    useEffect(() => {
+        (async () => {
+            const saved = await AsyncStorage.getItem("assign_state");
+            if (!saved) return;
+
+            const { orderId, disabledUntil } = JSON.parse(saved);
+            const now = Date.now();
+
+            if (now < disabledUntil) {
+                const remaining = Math.ceil((disabledUntil - now) / 1000);
+                setActiveOrderId(orderId);
+                setCountdown(remaining);
+                startTimer(orderId, remaining, disabledUntil);
+            } else {
+                await AsyncStorage.removeItem("assign_state");
+            }
+        })();
+    }, []);
+
+
     const { data, refetch } = useGetOrderByDriverIdQuery(riverData);
 
     useEffect(() => {
-        const eventName = `driver:${riverData}`;
-
-        socket.on(eventName, () => {
+        socket.on(`new_order`, () => {
             refetch();
         });
-        return () => socket.off(eventName);
+        return () => socket.off(`new_order`);
     }, [refetch]);
-
 
     /* ===================== LOAD SOUND ONCE ===================== */
     useEffect(() => {
@@ -79,31 +99,54 @@ export default function Main({ navigation, setHasDriver }) {
             soundRef.current.replayAsync(); // signal kelgan zahoti chaladi
         }
     }, [playRequest]);
+    const startTimer = (orderId, startFrom, disabledUntil) => {
+        clearInterval(timerRef.current);
+
+        setCountdown(startFrom);
+
+        timerRef.current = setInterval(async () => {
+            setCountdown(prev => {
+                if (prev <= 1) {
+                    clearInterval(timerRef.current);
+                    setActiveOrderId(null);
+                    AsyncStorage.removeItem("assign_state");
+                    return 0;
+                }
+                return prev - 1;
+            });
+        }, 1000);
+    };
 
 
     const handleAssignDriver = async (order) => {
-        if (!riverData) {
-            console.log("Driver topilmadi");
-            return;
-        }
-        if (!order?.location || !data?.innerData?.driverLocation) {
-            console.log("Location topilmadi");
-            return;
-        }
+        if (!riverData || activeOrderId) return;
 
         try {
-            const response = await assignDriver({
+            await assignDriver({
                 orderId: order._id,
                 driverId: riverData,
-                driverLocation: data.innerData.driverLocation,
-                clientLocation: order.location
-            }).unwrap(); // unwrap → promise resolve qilinadi yoki xatolik throw qilinadi
+                driverLocation: data?.innerData?.driverLocation,
+                clientLocation: order?.location
+            }).unwrap();
 
-            console.log("Driver assigned successfully:", response);
+            const disabledUntil = Date.now() + 30_000;
+
+            const payload = {
+                orderId: order._id,
+                disabledUntil
+            };
+
+            await AsyncStorage.setItem("assign_state", JSON.stringify(payload));
+
+            setActiveOrderId(order._id);
+            startTimer(order._id, 30, disabledUntil);
+
         } catch (err) {
-            console.error("Assign driver error:", err);
+            console.log(err);
         }
     };
+
+
 
     /* ===================== OPEN ROUTE ===================== */
     const handleOpenRoute = async (order) => {
@@ -148,7 +191,8 @@ export default function Main({ navigation, setHasDriver }) {
 
     /* ===================== ORDER CARD ===================== */
     const OrderCard = ({ order }) => {
-
+        const isActive = activeOrderId === order._id;
+        const isDisabled = activeOrderId && !isActive;
         return (
             <Animated.View style={styles.orderCard} >
                 {/* HEADER */}
@@ -156,18 +200,19 @@ export default function Main({ navigation, setHasDriver }) {
                     <View style={styles.orderHeader}>
                         <View style={styles.customerBadge}>
                             <Icon name="person" size={18} color="#fff" />
-                            <Text style={styles.customerName}>{order?.clientId.name} {order?.clientId.surname}</Text>
+                            <Text style={styles.customerName}>{order?.clientId?.name} {order?.clientId?.surname}</Text>
                         </View>
 
                         <View style={styles.distanceBadge}>
                             <Icon name="directions-car" size={16} color="#fff" />
-                            <Text style={styles.distanceText}>{order.distance} km</Text>
+                            <Text style={styles.distanceText}>{order?.distance} km</Text>
                         </View>
                         <TouchableOpacity
                             style={styles.acceptBtn}
+                            disabled={isDisabled || isActive} // map tugmasi 30s disable
                             onPress={() => handleOpenRoute(order)}
                         >
-                            <Icon name="map" size={20} color="#2ecc71" />
+                            <Icon name="map" size={20} color={isDisabled || isActive ? "gray" : "#2ecc71"} />
                         </TouchableOpacity>
 
                     </View>
@@ -175,22 +220,34 @@ export default function Main({ navigation, setHasDriver }) {
                     {/* FOOTER */}
                     <View style={styles.orderFooter}>
                         <View style={styles.routeContainer}>
-                            <Text style={styles.locationText}>{order?.service ? `${order?.service.value}  - ` : ""} {order.to}</Text>
+                            <Text style={styles.locationText}>{order?.service ? `${order?.service?.serviceId?.value}  - ` : ""} {order.to}</Text>
                         </View>
                         <TouchableOpacity
-                            style={styles.routeBtn}
-                            disabled={isLoading}
-                            loading={isLoading}
+                            style={[
+                                styles.routeBtn,
+                                isDisabled && { opacity: 0.5 }
+                            ]}
+                            disabled={isDisabled || isActive}
                             onPress={() => handleAssignDriver(order)}
                         >
-                            <Icon name="check-circle" size={18} color="#1e293be2" />
-                            <Text style={styles.btnText}>Qabul qilish</Text>
+                            {isActive ? (
+                                <Text style={styles.btnText}>
+                                    {countdown}
+                                </Text>
+                            ) : (
+                                <>
+                                    <Icon name="check-circle" size={18} color="#1e293be2" />
+                                    <Text style={styles.btnText}>Qabul qilish</Text>
+                                </>
+                            )}
                         </TouchableOpacity>
                     </View>
                 </View>
             </Animated.View>
         );
     };
+    console.log(data?.innerData?.orders);
+
 
     /* ===================== RENDER ===================== */
     return (
@@ -221,3 +278,5 @@ export default function Main({ navigation, setHasDriver }) {
         </View>
     );
 }
+
+
